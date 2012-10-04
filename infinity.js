@@ -282,7 +282,7 @@
   function updateStartIndex(listView, prepended) {
     var index, length, pages, lastIndex, nextLastIndex,
         startIndex = listView.startIndex,
-        viewRef = (this.useElementScroll ? listView.parent : $window),
+        viewRef = (listView.useElementScroll ? listView.parent : $window),
         viewTop = viewRef.scrollTop() - listView.top,
         viewHeight = viewRef.height(),
         viewBottom = viewTop + viewHeight,
