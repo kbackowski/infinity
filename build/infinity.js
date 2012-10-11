@@ -84,6 +84,11 @@
 
     initBuffer(this);
 
+    // Provide a method to disable repartitioning.
+    // Repartitioning is called unnecessarily due to the `window` being faux resized whenever
+    // an item is added to the `ListView` on a mobile web device.
+    this.repartitionOnResize = options.repartitionOnResize !== false;
+
     this.top = this.$el.offset().top;
     this.width = 0;
     this.height = 0;
@@ -91,9 +96,7 @@
     this.pages = [];
     this.startIndex = 0;
 
-    if ( this.useElementScroll ) {
-      this.parent = $el;
-    }
+    this.$scrollParent = this.useElementScroll ? $el : $window;
 
     DOMEvent.attach(this);
   }
@@ -180,10 +183,7 @@
 
     var firstPage,
         item = convertToItem(this, obj, true),
-        pages = this.pages,
-        page,
-        length,
-        index;
+        pages = this.pages;
 
     this.height += item.height;
     this.$el.height(this.height);
@@ -196,18 +196,56 @@
       pages.splice(0, 0, firstPage);
     }
 
-    firstPage.prepend(item);
+    updatePagePosition(pages, item.height, 1);
 
-    // loop through all other pages and update the top/bottom values
-    length = pages.length;
-    for ( index = 1; index < length; index++ ) {
-      page = pages[index];
-      page.top += item.height;
-      page.bottom += item.height;
-    }
+    firstPage.prepend(item);
     updateStartIndex(this, true);
 
     return item;
+  };
+
+  // ### updatePagePosition
+  //
+  // Update the top/bottom coordinate values for the given array of Pages
+  //
+  // Takes:
+  //
+  // - `pages`: array of Pages.
+  // - `positionChange`: the change in value to add to all Pages.
+  // - `offset`: an offset from the first page to process. Defaults to zero.
+
+  function updatePagePosition(pages, positionChange, offset) {
+    var length = pages.length,
+        i,
+        page;
+    for ( i = offset || 0; i < length; i++ ) {
+      page = pages[i];
+      page.top += positionChange;
+      page.bottom += positionChange;
+      // loop through all page items and update the top/bottom values
+      updateItemPosition(page.items, positionChange);
+    }
+  };
+
+  // ### updateItemPosition
+  //
+  // Update the top/bottom coordinate values for the given array of ListItems
+  //
+  // Takes:
+  //
+  // - `items`: array of ListItems.
+  // - `positionChange`: the change in value to add to all ListItems.
+  // - `offset`: an offset from the first item to process. Defaults to zero.
+
+  function updateItemPosition(items, positionChange, offset) {
+    var length = items.length,
+        i,
+        item;
+    for ( i = offset || 0; i < length; i++ ) {
+      item = items[i];
+      item.top += positionChange;
+      item.bottom += positionChange;
+    }
   };
 
   // ### cacheCoordsFor
@@ -230,7 +268,7 @@
     else {
       listView.$el.append(listItem.$el);
     }
-    updateCoords(listItem, listView.height);
+    updateCoords(listItem, prepend ? 0 : listView.height);
     listItem.$el.detach();
   }
 
@@ -282,7 +320,7 @@
   function updateStartIndex(listView, prepended) {
     var index, length, pages, lastIndex, nextLastIndex,
         startIndex = listView.startIndex,
-        viewRef = (listView.useElementScroll ? listView.parent : $window),
+        viewRef = listView.$scrollParent,
         viewTop = viewRef.scrollTop() - listView.top,
         viewHeight = viewRef.height(),
         viewBottom = viewTop + viewHeight,
@@ -362,6 +400,10 @@
         nextItem,
         pages = listView.pages,
         newPages = [];
+
+    if (!listView.repartitionOnResize) {
+      return;
+    }
 
     newPage = new Page(listView);
     newPages.push(newPage);
@@ -615,15 +657,12 @@
       //   event.
 
       attach: function(listView) {
-        if(listView.useElementScroll && !listView.eventIsBound) {
-          listView.parent.on('scroll', scrollHandler);
+        if(!listView.eventIsBound) {
+          listView.$scrollParent.on('scroll', scrollHandler);
           listView.eventIsBound = true;
         }
 
         if(!eventIsBound) {
-          if ( !listView.useElementScroll ) {
-            $window.on('scroll', scrollHandler);
-          }
           $window.on('resize', resizeHandler);
           eventIsBound = true;
         }
@@ -646,18 +685,15 @@
 
       detach: function(listView) {
         var index, length;
-        if(listView.useElementScroll && !listView.eventIsBound) {
-          listView.parent.on('scroll', scrollHandler);
-          listView.eventIsBound = true;
+        if(listView.eventIsBound) {
+          listView.$scrollParent.on('scroll', scrollHandler);
+          listView.eventIsBound = false;
         }
 
         for(index = 0, length = boundViews.length; index < length; index++) {
           if(boundViews[index] === listView) {
             boundViews.splice(index, 1);
             if(boundViews.length === 0) {
-              if(!listView.useElementScroll){
-                $window.off('scroll', scrollHandler);
-              }
               $window.off('resize', resizeHandler);
               eventIsBound = false;
             }
@@ -738,7 +774,7 @@
     this.width = this.width > item.width ? this.width : item.width;
     this.height = this.bottom - this.top;
 
-    items.push(item);
+    items.splice(0,0,item);
     item.parent = this;
     this.$el.prepend(item.$el);
 
@@ -751,7 +787,7 @@
   // Returns false if the Page is at max capacity; false otherwise.
 
   Page.prototype.hasVacancy = function() {
-    var viewRef = this.parent.useElementScroll ? this.parent.parent : $window;
+    var viewRef = this.parent.$scrollParent;
     return this.height < viewRef.height() * config.PAGE_TO_SCREEN_RATIO;
   };
 
